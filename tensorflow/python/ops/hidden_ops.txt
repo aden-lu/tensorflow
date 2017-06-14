@@ -14,6 +14,7 @@ MirrorPadGrad
 OneHot
 Pack
 Pad
+ParallelConcat
 Placeholder
 RefIdentity
 Reverse
@@ -54,58 +55,85 @@ BarrierIncompleteSize
 BarrierInsertMany
 BarrierReadySize
 BarrierTakeMany
-PriorityQueue
+DeleteSessionTensor
+FakeQueue
 FIFOQueue
+FIFOQueueV2
+GetSessionHandle
+GetSessionHandleV2
+GetSessionTensor
 HashTable
+HashTableV2
 InitializeTable
+InitializeTableV2
 InitializeTableFromTextFile
+InitializeTableFromTextFileV2
 LookupTableExport
+LookupTableExportV2
 LookupTableFind
+LookupTableFindV2
 LookupTableImport
+LookupTableImportV2
 LookupTableInsert
+LookupTableInsertV2
 LookupTableSize
+LookupTableSizeV2
 MutableDenseHashTable
+MutableDenseHashTableV2
 MutableHashTable
+MutableHashTableV2
 MutableHashTableOfTensors
+MutableHashTableOfTensorsV2
 Mutex
 MutexAcquire
 MutexRelease
 PaddingFIFOQueue
+PaddingFIFOQueueV2
+PriorityQueue
+PriorityQueueV2
 QueueClose
+QueueCloseV2
 QueueDequeue
+QueueDequeueV2
 QueueDequeueMany
+QueueDequeueManyV2
 QueueDequeueUpTo
+QueueDequeueUpToV2
 QueueEnqueue
+QueueEnqueueV2
 QueueEnqueueMany
+QueueEnqueueManyV2
 QueueSize
+QueueSizeV2
 RandomShuffleQueue
+RandomShuffleQueueV2
 Stack
+StackClose
 StackPop
 StackPush
-StackClose
 TensorArray
 TensorArrayClose
-TensorArrayConcat
-TensorArrayGather
-TensorArrayGrad
-TensorArrayRead
-TensorArrayPack
-TensorArrayScatter
-TensorArraySize
-TensorArraySplit
-TensorArrayUnpack
-TensorArrayWrite
-TensorArrayV2
 TensorArrayCloseV2
+TensorArrayConcat
 TensorArrayConcatV2
+TensorArrayGather
 TensorArrayGatherV2
+TensorArrayGrad
 TensorArrayGradV2
-TensorArrayReadV2
+TensorArrayPack
 TensorArrayPackV2
+TensorArrayRead
+TensorArrayReadV2
+TensorArrayScatter
 TensorArrayScatterV2
+TensorArraySize
 TensorArraySizeV2
+TensorArraySplit
 TensorArraySplitV2
+TensorArrayUnpack
 TensorArrayUnpackV2
+TensorArrayV2
+TensorArrayWrite
 TensorArrayWriteV2
 TensorArrayV3
 TensorArrayCloseV3
@@ -119,9 +147,6 @@ TensorArraySizeV3
 TensorArraySplitV3
 TensorArrayUnpackV3
 TensorArrayWriteV3
-GetSessionHandle
-GetSessionTensor
-DeleteSessionTensor
 
 # functional_ops
 SymbolicGradient
@@ -136,8 +161,6 @@ ScaleImageGrad
 # io_ops
 FixedLengthRecordReader
 IdentityReader
-ReaderClose
-ReaderEnqueueWork
 ReaderNumRecordsProduced
 ReaderNumWorkUnitsCompleted
 ReaderRead
@@ -146,6 +169,16 @@ ReaderReset
 ReaderRestoreState
 ReaderSerializeState
 ReaderWorkQueueLength
+FixedLengthRecordReaderV2
+IdentityReaderV2
+ReaderNumRecordsProducedV2
+ReaderNumWorkUnitsCompletedV2
+ReaderReadV2
+ReaderReadUpToV2
+ReaderResetV2
+ReaderRestoreStateV2
+ReaderSerializeStateV2
+ReaderWorkQueueLengthV2
 Restore
 RestoreSlice
 Save
@@ -155,6 +188,10 @@ ShardedFilespec
 TextLineReader
 TFRecordReader
 WholeFileReader
+TextLineReaderV2
+TFRecordReaderV2
+WholeFileReaderV2
+LMDBReader
 
 # linalg_ops
 BatchCholesky
@@ -176,13 +213,13 @@ Svd
 Assert
 AudioSummary
 AudioSummaryV2
-HistogramAccumulatorSummary
 HistogramSummary
 ImageSummary
 MergeSummary
 Print
 ScalarSummary
 TensorSummary
+TensorSummaryV2
 
 # math_ops
 Abs
@@ -196,6 +233,7 @@ BatchFFT3D
 BatchIFFT
 BatchIFFT2D
 BatchIFFT3D
+Bucketize
 Complex
 ComplexAbs
 Conj
@@ -204,12 +242,15 @@ FloorMod
 Max
 Mean
 Min
+Mul
+Neg
 Pow
 Prod
 Range
 RealDiv
 Select
 SparseMatMul
+Sub
 Sum
 MatMul
 Sigmoid
@@ -225,6 +266,7 @@ TruncateMod
 
 # nn_ops
 AvgPoolGrad  # "*Grad" accessible through nn_grad instead of nn_ops.
+AvgPool3DGrad
 BatchNormWithGlobalNormalization
 BatchNormWithGlobalNormalizationGrad
 FusedBatchNorm
@@ -233,6 +275,10 @@ SparseSoftmaxCrossEntropyWithLogits
 LRNGrad
 MaxPoolGrad
 MaxPoolGradWithArgmax
+MaxPoolGradGrad
+MaxPoolGradGradWithArgmax
+MaxPool3DGrad
+MaxPool3DGradGrad
 ReluGrad
 Relu6Grad
 EluGrad
@@ -256,6 +302,7 @@ ParseSingleSequenceExample
 
 # random_ops
 RandomGamma
+RandomPoisson
 RandomUniform
 RandomUniformInt
 RandomShuffle
@@ -268,9 +315,6 @@ PyFunc
 PyFuncStateless
 
 # sdca_ops
-SdcaFprint
-SdcaOptimizer
-SdcaShrinkL1
 
 # state_ops
 Variable
@@ -288,6 +332,9 @@ SerializeSparse
 SparseAdd
 SparseAddGrad
 SparseConcat
+SparseCross
+SparseFillEmptyRows
+SparseFillEmptyRowsGrad
 SparseSplit
 SparseSelectLastK
 SparseReorder

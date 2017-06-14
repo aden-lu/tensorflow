@@ -17,6 +17,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import shutil
 import tempfile
 
@@ -25,10 +26,13 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.client import session
-from tensorflow.python.debug import debug_data
-from tensorflow.python.debug import debug_utils
 from tensorflow.python.debug.cli import analyzer_cli
+from tensorflow.python.debug.cli import cli_shared
+from tensorflow.python.debug.cli import command_parser
 from tensorflow.python.debug.cli import debugger_cli_common
+from tensorflow.python.debug.lib import debug_data
+from tensorflow.python.debug.lib import debug_utils
+from tensorflow.python.debug.lib import source_utils
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import control_flow_ops
@@ -36,6 +40,11 @@ from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import googletest
 from tensorflow.python.platform import test
+from tensorflow.python.util import tf_inspect
+
+
+def line_number_above():
+  return tf_inspect.stack()[1][2] - 1
 
 
 def parse_op_and_node(line):
@@ -135,37 +144,51 @@ def assert_listed_tensors(tst,
 
   # Verify the command shortcuts in the top row.
   attr_segs = out.font_attr_segs[line_counter]
-  tst.assertEqual(0, attr_segs[0][0])
-  tst.assertEqual(len("t (ms)"), attr_segs[0][1])
-  command = attr_segs[0][2][0].content
+  attr_seg = attr_segs[0]
+  tst.assertEqual(0, attr_seg[0])
+  tst.assertEqual(len("t (ms)"), attr_seg[1])
+  command = attr_seg[2][0].content
   tst.assertIn("-s timestamp", command)
   assert_column_header_command_shortcut(
       tst, command, reverse, node_name_regex, op_type_regex,
       tensor_filter_name)
-  tst.assertEqual("bold", attr_segs[0][2][1])
+  tst.assertEqual("bold", attr_seg[2][1])
+
+  idx0 = line.index("Size")
+  attr_seg = attr_segs[1]
+  tst.assertEqual(idx0, attr_seg[0])
+  tst.assertEqual(idx0 + len("Size"), attr_seg[1])
+  command = attr_seg[2][0].content
+  tst.assertIn("-s dump_size", command)
+  assert_column_header_command_shortcut(tst, command, reverse, node_name_regex,
+                                        op_type_regex, tensor_filter_name)
+  tst.assertEqual("bold", attr_seg[2][1])
 
   idx0 = line.index("Op type")
-  tst.assertEqual(idx0, attr_segs[1][0])
-  tst.assertEqual(idx0 + len("Op type"), attr_segs[1][1])
-  command = attr_segs[1][2][0].content
+  attr_seg = attr_segs[2]
+  tst.assertEqual(idx0, attr_seg[0])
+  tst.assertEqual(idx0 + len("Op type"), attr_seg[1])
+  command = attr_seg[2][0].content
   tst.assertIn("-s op_type", command)
   assert_column_header_command_shortcut(
       tst, command, reverse, node_name_regex, op_type_regex,
       tensor_filter_name)
-  tst.assertEqual("bold", attr_segs[1][2][1])
+  tst.assertEqual("bold", attr_seg[2][1])
 
   idx0 = line.index("Tensor name")
-  tst.assertEqual(idx0, attr_segs[2][0])
-  tst.assertEqual(idx0 + len("Tensor name"), attr_segs[2][1])
-  command = attr_segs[2][2][0].content
+  attr_seg = attr_segs[3]
+  tst.assertEqual(idx0, attr_seg[0])
+  tst.assertEqual(idx0 + len("Tensor name"), attr_seg[1])
+  command = attr_seg[2][0].content
   tst.assertIn("-s tensor_name", command)
   assert_column_header_command_shortcut(
       tst, command, reverse, node_name_regex, op_type_regex,
       tensor_filter_name)
-  tst.assertEqual("bold", attr_segs[2][2][1])
+  tst.assertEqual("bold", attr_seg[2][1])
 
   # Verify the listed tensors and their timestamps.
   tensor_timestamps = []
+  dump_sizes_bytes = []
   op_types = []
   tensor_names = []
   for line in line_iter:
@@ -176,8 +199,9 @@ def assert_listed_tensors(tst,
     tst.assertGreaterEqual(rel_time, 0.0)
 
     tensor_timestamps.append(rel_time)
-    op_types.append(items[1])
-    tensor_names.append(items[2])
+    dump_sizes_bytes.append(command_parser.parse_readable_size_str(items[1]))
+    op_types.append(items[2])
+    tensor_names.append(items[3])
 
   # Verify that the tensors should be listed in ascending order of their
   # timestamps.
@@ -186,6 +210,11 @@ def assert_listed_tensors(tst,
     if reverse:
       sorted_timestamps.reverse()
     tst.assertEqual(sorted_timestamps, tensor_timestamps)
+  elif sort_by == "dump_size":
+    sorted_dump_sizes_bytes = sorted(dump_sizes_bytes)
+    if reverse:
+      sorted_dump_sizes_bytes.reverse()
+    tst.assertEqual(sorted_dump_sizes_bytes, dump_sizes_bytes)
   elif sort_by == "op_type":
     sorted_op_types = sorted(op_types)
     if reverse:
@@ -353,7 +382,6 @@ def assert_node_attribute_lines(tst,
         while True:
           for i in range(5):
             line = next(line_iter)
-            print(line)
             if i == 0:
               tst.assertEqual(depth_counter, int(line.split(":")[0]))
             elif i == 1:
@@ -470,9 +498,13 @@ class AnalyzerCLISimpleMulAddTest(test_util.TensorFlowTestCase):
 
     cls._is_gpu_available = test.is_gpu_available()
     if cls._is_gpu_available:
-      cls._main_device = "/job:localhost/replica:0/task:0/gpu:0"
+      gpu_name = test_util.gpu_device_name()
+      cls._main_device = "/job:localhost/replica:0/task:0" + gpu_name
     else:
       cls._main_device = "/job:localhost/replica:0/task:0/cpu:0"
+
+    cls._curr_file_path = os.path.abspath(
+        tf_inspect.getfile(tf_inspect.currentframe()))
 
     cls._sess = session.Session()
     with cls._sess as sess:
@@ -482,14 +514,19 @@ class AnalyzerCLISimpleMulAddTest(test_util.TensorFlowTestCase):
       u_name = "simple_mul_add/u"
       v_name = "simple_mul_add/v"
 
-      u_init = constant_op.constant(u_init_val, shape=[2, 2])
+      u_init = constant_op.constant(u_init_val, shape=[2, 2], name="u_init")
       u = variables.Variable(u_init, name=u_name)
-      v_init = constant_op.constant(v_init_val, shape=[2, 1])
+      cls._u_line_number = line_number_above()
+
+      v_init = constant_op.constant(v_init_val, shape=[2, 1], name="v_init")
       v = variables.Variable(v_init, name=v_name)
+      cls._v_line_number = line_number_above()
 
       w = math_ops.matmul(u, v, name="simple_mul_add/matmul")
+      cls._w_line_number = line_number_above()
 
       x = math_ops.add(w, w, name="simple_mul_add/add")
+      cls._x_line_number = line_number_above()
 
       u.initializer.run()
       v.initializer.run()
@@ -530,6 +567,16 @@ class AnalyzerCLISimpleMulAddTest(test_util.TensorFlowTestCase):
         cls._analyzer.print_tensor,
         cls._analyzer.get_help("print_tensor"),
         prefix_aliases=["pt"])
+    cls._registry.register_command_handler(
+        "print_source",
+        cls._analyzer.print_source,
+        cls._analyzer.get_help("print_source"),
+        prefix_aliases=["ps"])
+    cls._registry.register_command_handler(
+        "list_source",
+        cls._analyzer.list_source,
+        cls._analyzer.get_help("list_source"),
+        prefix_aliases=["ls"])
 
   @classmethod
   def tearDownClass(cls):
@@ -561,6 +608,33 @@ class AnalyzerCLISimpleMulAddTest(test_util.TensorFlowTestCase):
         ],
         ["VariableV2", "VariableV2", "Identity", "Identity", "MatMul", "Add"],
         sort_by="timestamp",
+        reverse=True)
+    check_main_menu(self, out, list_tensors_enabled=False)
+
+  def testListTensorsInDumpSizeOrderWorks(self):
+    out = self._registry.dispatch_command("lt", ["-s", "dump_size"])
+    assert_listed_tensors(
+        self,
+        out, [
+            "simple_mul_add/u:0", "simple_mul_add/v:0",
+            "simple_mul_add/u/read:0", "simple_mul_add/v/read:0",
+            "simple_mul_add/matmul:0", "simple_mul_add/add:0"
+        ],
+        ["VariableV2", "VariableV2", "Identity", "Identity", "MatMul", "Add"],
+        sort_by="dump_size")
+    check_main_menu(self, out, list_tensors_enabled=False)
+
+  def testListTensorsInReverseDumpSizeOrderWorks(self):
+    out = self._registry.dispatch_command("lt", ["-s", "dump_size", "-r"])
+    assert_listed_tensors(
+        self,
+        out, [
+            "simple_mul_add/u:0", "simple_mul_add/v:0",
+            "simple_mul_add/u/read:0", "simple_mul_add/v/read:0",
+            "simple_mul_add/matmul:0", "simple_mul_add/add:0"
+        ],
+        ["VariableV2", "VariableV2", "Identity", "Identity", "MatMul", "Add"],
+        sort_by="dump_size",
         reverse=True)
     check_main_menu(self, out, list_tensors_enabled=False)
 
@@ -840,7 +914,7 @@ class AnalyzerCLISimpleMulAddTest(test_util.TensorFlowTestCase):
         ["ERROR: There is no node named \"bar\" in the partition graphs"],
         out.lines)
     # Check color indicating error.
-    self.assertEqual({0: [(0, 59, "red")]}, out.font_attr_segs)
+    self.assertEqual({0: [(0, 59, cli_shared.COLOR_RED)]}, out.font_attr_segs)
     check_main_menu(self, out, list_tensors_enabled=True)
 
   def testPrintTensor(self):
@@ -1069,6 +1143,246 @@ class AnalyzerCLISimpleMulAddTest(test_util.TensorFlowTestCase):
                                  "There is no tensor filter named \"bar\""):
       analyzer.get_tensor_filter("bar")
 
+  def _findSourceLine(self, annotated_source, line_number):
+    """Find line of given line number in annotated source.
+
+    Args:
+      annotated_source: (debugger_cli_common.RichTextLines) the annotated source
+      line_number: (int) 1-based line number
+
+    Returns:
+      (int) If line_number is found, 0-based line index in
+        annotated_source.lines. Otherwise, None.
+    """
+
+    index = None
+    for i, line in enumerate(annotated_source.lines):
+      if line.startswith("L%d " % line_number):
+        index = i
+        break
+    return index
+
+  def testPrintSourceForOpNamesWholeFileWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command(
+        "print_source", [self._curr_file_path], screen_info={"cols": 80})
+
+    # Verify the annotation of the line that creates u.
+    index = self._findSourceLine(out, self._u_line_number)
+    self.assertEqual(
+        ["L%d         u = variables.Variable(u_init, name=u_name)" %
+         self._u_line_number,
+         "    simple_mul_add/u",
+         "    simple_mul_add/u/Assign",
+         "    simple_mul_add/u/read"],
+        out.lines[index : index + 4])
+    self.assertEqual("pt simple_mul_add/u",
+                     out.font_attr_segs[index + 1][0][2].content)
+    # simple_mul_add/u/Assign is not used in this run because the Variable has
+    # already been initialized.
+    self.assertEqual(cli_shared.COLOR_BLUE, out.font_attr_segs[index + 2][0][2])
+    self.assertEqual("pt simple_mul_add/u/read",
+                     out.font_attr_segs[index + 3][0][2].content)
+
+    # Verify the annotation of the line that creates v.
+    index = self._findSourceLine(out, self._v_line_number)
+    self.assertEqual(
+        ["L%d         v = variables.Variable(v_init, name=v_name)" %
+         self._v_line_number,
+         "    simple_mul_add/v"],
+        out.lines[index : index + 2])
+    self.assertEqual("pt simple_mul_add/v",
+                     out.font_attr_segs[index + 1][0][2].content)
+
+    # Verify the annotation of the line that creates w.
+    index = self._findSourceLine(out, self._w_line_number)
+    self.assertEqual(
+        ["L%d         " % self._w_line_number +
+         "w = math_ops.matmul(u, v, name=\"simple_mul_add/matmul\")",
+         "    simple_mul_add/matmul"],
+        out.lines[index : index + 2])
+    self.assertEqual("pt simple_mul_add/matmul",
+                     out.font_attr_segs[index + 1][0][2].content)
+
+    # Verify the annotation of the line that creates x.
+    index = self._findSourceLine(out, self._x_line_number)
+    self.assertEqual(
+        ["L%d         " % self._x_line_number +
+         "x = math_ops.add(w, w, name=\"simple_mul_add/add\")",
+         "    simple_mul_add/add"],
+        out.lines[index : index + 2])
+    self.assertEqual("pt simple_mul_add/add",
+                     out.font_attr_segs[index + 1][0][2].content)
+
+  def testPrintSourceForTensorNamesWholeFileWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command(
+        "print_source",
+        [self._curr_file_path, "--tensors"],
+        screen_info={"cols": 80})
+
+    # Verify the annotation of the line that creates u.
+    index = self._findSourceLine(out, self._u_line_number)
+    self.assertEqual(
+        ["L%d         u = variables.Variable(u_init, name=u_name)" %
+         self._u_line_number,
+         "    simple_mul_add/u/read:0",
+         "    simple_mul_add/u:0"],
+        out.lines[index : index + 3])
+    self.assertEqual("pt simple_mul_add/u/read:0",
+                     out.font_attr_segs[index + 1][0][2].content)
+    self.assertEqual("pt simple_mul_add/u:0",
+                     out.font_attr_segs[index + 2][0][2].content)
+
+  def testPrintSourceForOpNamesStartingAtSpecifiedLineWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command(
+        "print_source",
+        [self._curr_file_path, "-b", "3"],
+        screen_info={"cols": 80})
+
+    self.assertIn("Omitted 2 source lines", out.lines[0])
+    self.assertTrue(out.lines[0].endswith("+5"))
+    expand_lines_command = out.font_attr_segs[0][-1][2].content
+    self.assertStartsWith(expand_lines_command,
+                          "ps %s " % self._curr_file_path)
+    self.assertIn("-b 1", expand_lines_command)
+
+    self.assertIsNone(self._findSourceLine(out, 1))
+    self.assertIsNone(self._findSourceLine(out, 2))
+    self.assertIsNotNone(self._findSourceLine(out, 3))
+
+    index = self._findSourceLine(out, self._u_line_number)
+    self.assertEqual(
+        ["L%d         u = variables.Variable(u_init, name=u_name)" %
+         self._u_line_number,
+         "    simple_mul_add/u",
+         "    simple_mul_add/u/Assign",
+         "    simple_mul_add/u/read"],
+        out.lines[index : index + 4])
+    self.assertEqual("pt simple_mul_add/u",
+                     out.font_attr_segs[index + 1][0][2].content)
+    # simple_mul_add/u/Assign is not used in this run because the Variable has
+    # already been initialized.
+    self.assertEqual(cli_shared.COLOR_BLUE, out.font_attr_segs[index + 2][0][2])
+    self.assertEqual("pt simple_mul_add/u/read",
+                     out.font_attr_segs[index + 3][0][2].content)
+
+  def testPrintSourceForOpNameSettingMaximumElementCountWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command(
+        "print_source",
+        [self._curr_file_path, "-m", "1"],
+        screen_info={"cols": 80})
+
+    index = self._findSourceLine(out, self._u_line_number)
+    self.assertEqual(
+        ["L%d         u = variables.Variable(u_init, name=u_name)" %
+         self._u_line_number,
+         "    simple_mul_add/u",
+         "    (... Omitted 2 of 3 op(s) ...) +5"],
+        out.lines[index : index + 3])
+    self.assertEqual("pt simple_mul_add/u",
+                     out.font_attr_segs[index + 1][0][2].content)
+    more_elements_command = out.font_attr_segs[index + 2][-1][2].content
+    self.assertStartsWith(more_elements_command,
+                          "ps %s " % self._curr_file_path)
+    self.assertIn(" -m 6", more_elements_command)
+
+  def testListSourceWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command("list_source", [])
+
+    non_tf_lib_files_start = [
+        i for i in xrange(len(out.lines))
+        if out.lines[i].startswith("Source file path")][0] + 1
+    non_tf_lib_files_end = [
+        i for i in xrange(len(out.lines))
+        if out.lines[i].startswith("TensorFlow Python library file(s):")][0] - 1
+    non_tf_lib_files = [
+        line.split(" ")[0] for line
+        in out.lines[non_tf_lib_files_start : non_tf_lib_files_end]]
+    self.assertIn(self._curr_file_path, non_tf_lib_files)
+
+    # Check that the TF library files are marked with special color attribute.
+    for i in xrange(non_tf_lib_files_end + 1, len(out.lines)):
+      if not out.lines[i]:
+        continue
+      for attr_seg in  out.font_attr_segs[i]:
+        self.assertTrue(cli_shared.COLOR_GRAY in attr_seg[2] or
+                        attr_seg[2] == cli_shared.COLOR_GRAY)
+
+  def testListSourceWithNodeNameFilterWithMatchesWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command("list_source", ["-n", ".*/read"])
+
+    self.assertStartsWith(out.lines[1], "Node name regex filter: \".*/read\"")
+
+    non_tf_lib_files_start = [
+        i for i in xrange(len(out.lines))
+        if out.lines[i].startswith("Source file path")][0] + 1
+    non_tf_lib_files_end = [
+        i for i in xrange(len(out.lines))
+        if out.lines[i].startswith("TensorFlow Python library file(s):")][0] - 1
+    non_tf_lib_files = [
+        line.split(" ")[0] for line
+        in out.lines[non_tf_lib_files_start : non_tf_lib_files_end]]
+    self.assertIn(self._curr_file_path, non_tf_lib_files)
+
+    # Check that the TF library files are marked with special color attribute.
+    for i in xrange(non_tf_lib_files_end + 1, len(out.lines)):
+      if not out.lines[i]:
+        continue
+      for attr_seg in  out.font_attr_segs[i]:
+        self.assertTrue(cli_shared.COLOR_GRAY in attr_seg[2] or
+                        attr_seg[2] == cli_shared.COLOR_GRAY)
+
+  def testListSourceWithNodeNameFilterWithNoMatchesWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command("list_source", ["-n", "^$"])
+
+    self.assertEqual([
+        "List of source files that created nodes in this run",
+        "Node name regex filter: \"^$\"", "",
+        "[No source file information.]"], out.lines)
+
+  def testListSourceWithPathAndNodeNameFiltersWorks(self):
+    self._debug_dump.set_python_graph(self._sess.graph)
+    out = self._registry.dispatch_command(
+        "list_source", ["-p", self._curr_file_path, "-n", ".*read"])
+
+    self.assertEqual([
+        "List of source files that created nodes in this run",
+        "File path regex filter: \"%s\"" % self._curr_file_path,
+        "Node name regex filter: \".*read\"", ""], out.lines[:4])
+
+  def testListSourceWithCompiledPythonSourceWorks(self):
+    def fake_list_source_files_against_dump(dump,
+                                            path_regex_whitelist=None,
+                                            node_name_regex_whitelist=None):
+      del dump, path_regex_whitelist, node_name_regex_whitelist
+      return [("compiled_1.pyc", False, 10, 20, 30, 4),
+              ("compiled_2.pyo", False, 10, 20, 30, 5),
+              ("uncompiled.py", False, 10, 20, 30, 6)]
+
+    with test.mock.patch.object(
+        source_utils, "list_source_files_against_dump",
+        side_effect=fake_list_source_files_against_dump):
+      out = self._registry.dispatch_command("list_source", [])
+
+      self.assertStartsWith(out.lines[4], "compiled_1.pyc")
+      self.assertEqual((0, 14, [cli_shared.COLOR_WHITE]),
+                       out.font_attr_segs[4][0])
+      self.assertStartsWith(out.lines[5], "compiled_2.pyo")
+      self.assertEqual((0, 14, [cli_shared.COLOR_WHITE]),
+                       out.font_attr_segs[5][0])
+      self.assertStartsWith(out.lines[6], "uncompiled.py")
+      self.assertEqual(0, out.font_attr_segs[6][0][0])
+      self.assertEqual(13, out.font_attr_segs[6][0][1])
+      self.assertEqual(cli_shared.COLOR_WHITE, out.font_attr_segs[6][0][2][0])
+      self.assertEqual("ps uncompiled.py -b 6",
+                       out.font_attr_segs[6][0][2][1].content)
+
 
 class AnalyzerCLIPrintLargeTensorTest(test_util.TensorFlowTestCase):
 
@@ -1148,7 +1462,8 @@ class AnalyzerCLIControlDepTest(test_util.TensorFlowTestCase):
 
     cls._is_gpu_available = test.is_gpu_available()
     if cls._is_gpu_available:
-      cls._main_device = "/job:localhost/replica:0/task:0/gpu:0"
+      gpu_name = test_util.gpu_device_name()
+      cls._main_device = "/job:localhost/replica:0/task:0" + gpu_name
     else:
       cls._main_device = "/job:localhost/replica:0/task:0/cpu:0"
 
@@ -1234,7 +1549,7 @@ class AnalyzerCLIControlDepTest(test_util.TensorFlowTestCase):
     # Verify the menu items (command shortcuts) in the output.
     check_menu_item(self, out, 10,
                     len(out.lines[10]) - len("control_deps/x/read"),
-                    len(out.lines[10]), "ni -a -d control_deps/x/read")
+                    len(out.lines[10]), "ni -a -d -t control_deps/x/read")
     if out.lines[13].endswith("control_deps/ctrl_dep_y"):
       y_line = 13
       z_line = 14
@@ -1243,10 +1558,12 @@ class AnalyzerCLIControlDepTest(test_util.TensorFlowTestCase):
       z_line = 13
     check_menu_item(self, out, y_line,
                     len(out.lines[y_line]) - len("control_deps/ctrl_dep_y"),
-                    len(out.lines[y_line]), "ni -a -d control_deps/ctrl_dep_y")
+                    len(out.lines[y_line]),
+                    "ni -a -d -t control_deps/ctrl_dep_y")
     check_menu_item(self, out, z_line,
                     len(out.lines[z_line]) - len("control_deps/ctrl_dep_z"),
-                    len(out.lines[z_line]), "ni -a -d control_deps/ctrl_dep_z")
+                    len(out.lines[z_line]),
+                    "ni -a -d -t control_deps/ctrl_dep_z")
 
   def testListInputsNonRecursiveNoControl(self):
     """List inputs non-recursively, without any control inputs."""
@@ -1561,7 +1878,8 @@ class AnalyzerCLIWhileLoopTest(test_util.TensorFlowTestCase):
       self.assertEqual("  dtype: int32", output.lines[1])
       self.assertEqual("  shape: ()", output.lines[2])
       self.assertEqual("", output.lines[3])
-      self.assertEqual("array(%d, dtype=int32)" % i, output.lines[4])
+      self.assertTrue(output.lines[4].startswith("array(%d" % i))
+      self.assertTrue(output.lines[4].endswith(")"))
 
   def testMultipleDumpsPrintTensorInvalidNumber(self):
     output = self._registry.dispatch_command("pt",

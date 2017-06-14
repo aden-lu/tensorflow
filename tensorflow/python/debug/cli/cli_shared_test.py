@@ -30,6 +30,81 @@ from tensorflow.python.ops import variables
 from tensorflow.python.platform import googletest
 
 
+class BytesToReadableStrTest(test_util.TensorFlowTestCase):
+
+  def testNoneSizeWorks(self):
+    self.assertEqual(str(None), cli_shared.bytes_to_readable_str(None))
+
+  def testSizesBelowOneKiloByteWorks(self):
+    self.assertEqual("0", cli_shared.bytes_to_readable_str(0))
+    self.assertEqual("500", cli_shared.bytes_to_readable_str(500))
+    self.assertEqual("1023", cli_shared.bytes_to_readable_str(1023))
+
+  def testSizesBetweenOneKiloByteandOneMegaByteWorks(self):
+    self.assertEqual("1.00k", cli_shared.bytes_to_readable_str(1024))
+    self.assertEqual("2.40k", cli_shared.bytes_to_readable_str(int(1024 * 2.4)))
+    self.assertEqual("1023.00k", cli_shared.bytes_to_readable_str(1024 * 1023))
+
+  def testSizesBetweenOneMegaByteandOneGigaByteWorks(self):
+    self.assertEqual("1.00M", cli_shared.bytes_to_readable_str(1024**2))
+    self.assertEqual("2.40M",
+                     cli_shared.bytes_to_readable_str(int(1024**2 * 2.4)))
+    self.assertEqual("1023.00M",
+                     cli_shared.bytes_to_readable_str(1024**2 * 1023))
+
+  def testSizeAboveOneGigaByteWorks(self):
+    self.assertEqual("1.00G", cli_shared.bytes_to_readable_str(1024**3))
+    self.assertEqual("2000.00G",
+                     cli_shared.bytes_to_readable_str(1024**3 * 2000))
+
+  def testReadableStrIncludesBAtTheEndOnRequest(self):
+    self.assertEqual("0B", cli_shared.bytes_to_readable_str(0, include_b=True))
+    self.assertEqual(
+        "1.00kB", cli_shared.bytes_to_readable_str(
+            1024, include_b=True))
+    self.assertEqual(
+        "1.00MB", cli_shared.bytes_to_readable_str(
+            1024**2, include_b=True))
+    self.assertEqual(
+        "1.00GB", cli_shared.bytes_to_readable_str(
+            1024**3, include_b=True))
+
+
+class TimeToReadableStrTest(test_util.TensorFlowTestCase):
+
+  def testNoneTimeWorks(self):
+    self.assertEqual("0", cli_shared.time_to_readable_str(None))
+
+  def testMicrosecondsTime(self):
+    self.assertEqual("40us", cli_shared.time_to_readable_str(40))
+
+  def testMillisecondTime(self):
+    self.assertEqual("40ms", cli_shared.time_to_readable_str(40e3))
+
+  def testSecondTime(self):
+    self.assertEqual("40s", cli_shared.time_to_readable_str(40e6))
+
+  def testForceTimeUnit(self):
+    self.assertEqual("40s",
+                     cli_shared.time_to_readable_str(
+                         40e6, force_time_unit=cli_shared.TIME_UNIT_S))
+    self.assertEqual("40000ms",
+                     cli_shared.time_to_readable_str(
+                         40e6, force_time_unit=cli_shared.TIME_UNIT_MS))
+    self.assertEqual("40000000us",
+                     cli_shared.time_to_readable_str(
+                         40e6, force_time_unit=cli_shared.TIME_UNIT_US))
+    self.assertEqual("4e-05s",
+                     cli_shared.time_to_readable_str(
+                         40, force_time_unit=cli_shared.TIME_UNIT_S))
+    self.assertEqual("0",
+                     cli_shared.time_to_readable_str(
+                         0, force_time_unit=cli_shared.TIME_UNIT_S))
+
+    with self.assertRaisesRegexp(ValueError, r"Invalid time unit: ks"):
+      cli_shared.time_to_readable_str(100, force_time_unit="ks")
+
+
 class GetRunStartIntroAndDescriptionTest(test_util.TensorFlowTestCase):
 
   def setUp(self):

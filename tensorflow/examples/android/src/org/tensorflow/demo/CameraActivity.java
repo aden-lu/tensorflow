@@ -151,14 +151,17 @@ public abstract class CameraActivity extends Activity implements OnImageAvailabl
   }
 
   protected void setFragment() {
-    final Fragment fragment = CameraConnectionFragment.newInstance(
-        new CameraConnectionFragment.ConnectionCallback(){
-          @Override
-          public void onPreviewSizeChosen(final Size size, final int rotation) {
-            CameraActivity.this.onPreviewSizeChosen(size, rotation);
-          }
-        },
-        this, getLayoutId(), getDesiredPreviewFrameSize());
+    final Fragment fragment =
+        CameraConnectionFragment.newInstance(
+            new CameraConnectionFragment.ConnectionCallback() {
+              @Override
+              public void onPreviewSizeChosen(final Size size, final int rotation) {
+                CameraActivity.this.onPreviewSizeChosen(size, rotation);
+              }
+            },
+            this,
+            getLayoutId(),
+            getDesiredPreviewFrameSize());
 
     getFragmentManager()
         .beginTransaction()
@@ -184,20 +187,20 @@ public abstract class CameraActivity extends Activity implements OnImageAvailabl
   }
 
   public void requestRender() {
-    final OverlayView overlay = (OverlayView) findViewById(R.id.overlay);
+    final OverlayView overlay = (OverlayView) findViewById(R.id.debug_overlay);
     if (overlay != null) {
       overlay.postInvalidate();
     }
   }
 
   public void addCallback(final OverlayView.DrawCallback callback) {
-    final OverlayView overlay = (OverlayView) findViewById(R.id.overlay);
+    final OverlayView overlay = (OverlayView) findViewById(R.id.debug_overlay);
     if (overlay != null) {
       overlay.addCallback(callback);
     }
   }
 
-  public void onSetDebug(boolean debug) {}
+  public void onSetDebug(final boolean debug) {}
 
   @Override
   public boolean onKeyDown(final int keyCode, final KeyEvent event) {
@@ -212,5 +215,5 @@ public abstract class CameraActivity extends Activity implements OnImageAvailabl
 
   protected abstract void onPreviewSizeChosen(final Size size, final int rotation);
   protected abstract int getLayoutId();
-  protected abstract int getDesiredPreviewFrameSize();
+  protected abstract Size getDesiredPreviewFrameSize();
 }
